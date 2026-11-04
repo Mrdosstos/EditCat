@@ -1,8 +1,8 @@
 {
-  "name": "reo-editor",
+  "name": "editcat",
   "version": "0.1.0",
   "private": true,
-  "description": "REO: editor de vídeo no navegador (linha do tempo, cortes, filtros, texto, música e exportação).",
+  "description": "EditCat: editor de vídeo no navegador (linha do tempo, cortes, filtros, texto, música e exportação).",
   "type": "commonjs",
   "scripts": {
     "build": "node scripts/build.mjs",

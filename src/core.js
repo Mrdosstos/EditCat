@@ -1,4 +1,4 @@
-/* REO core: pure editing logic, no DOM. Shared by the app and the tests. */
+/* EditCat core: pure editing logic, no DOM. Shared by the app and the tests. */
 (function (root) {
   'use strict';
   const FPS = 30;
@@ -195,7 +195,7 @@
   }
 
   function exportFilename(name, ext) {
-    const base = String(name || '').normalize('NFC').replace(/[^\p{L}\p{N} _-]+/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'reo';
+    const base = String(name || '').normalize('NFC').replace(/[^\p{L}\p{N} _-]+/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'editcat';
     return `${base}.${ext}`;
   }
 
@@ -234,5 +234,5 @@
     remove, snapTime, audioGain, sourceTime, textAnim, transitionState, exportFilename, mediaKind, pruneMissing, History,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
-  else root.ReoCore = core;
+  else root.EditCatCore = core;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -201,8 +201,8 @@ test('transitionState só existe no começo do clipe', () => {
 test('exportFilename limpa o nome do projeto', () => {
   assert.equal(C.exportFilename('Férias na praia!', 'mp4'), 'Férias-na-praia.mp4');
   assert.equal(C.exportFilename('../../etc/passwd', 'webm'), 'etcpasswd.webm');
-  assert.equal(C.exportFilename('', 'mp4'), 'reo.mp4');
-  assert.equal(C.exportFilename('   ', 'mp4'), 'reo.mp4');
+  assert.equal(C.exportFilename('', 'mp4'), 'editcat.mp4');
+  assert.equal(C.exportFilename('   ', 'mp4'), 'editcat.mp4');
   assert.ok(C.exportFilename('x'.repeat(200), 'mp4').length <= 64);
 });
 

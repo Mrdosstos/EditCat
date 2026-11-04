@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}[hidden]{display:none!important}</style></head><body>
-<title>REO Editor</title>
+<title>EditCat</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -183,7 +183,7 @@ dialog::backdrop{background:rgba(5,6,8,.7)}
 
 <div id="app">
   <header class="top">
-    <div class="mark" aria-label="REO">REO<i></i></div>
+    <div class="mark" aria-label="EditCat">EditCat<i></i></div>
     <input id="projName" class="pname" aria-label="Nome do projeto" value="Projeto sem título" maxlength="60">
     <div class="top-actions">
       <button id="newBtn" class="btn" type="button">Novo projeto</button>
@@ -252,7 +252,7 @@ dialog::backdrop{background:rgba(5,6,8,.7)}
 <dialog id="expDlg">
   <div class="dlg" id="expSetup">
     <h3>Exportar vídeo</h3>
-    <p>O REO grava a linha do tempo em tempo real. Deixe esta aba aberta até terminar.</p>
+    <p>O EditCat grava a linha do tempo em tempo real. Deixe esta aba aberta até terminar.</p>
     <div class="sec">
       <div class="lbl">Resolução</div>
       <div class="chips" id="qChips">
@@ -291,7 +291,7 @@ dialog::backdrop{background:rgba(5,6,8,.7)}
 </dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script>/* REO core: pure editing logic, no DOM. Shared by the app and the tests. */
+<script>/* EditCat core: pure editing logic, no DOM. Shared by the app and the tests. */
 (function (root) {
   'use strict';
   const FPS = 30;
@@ -488,7 +488,7 @@ dialog::backdrop{background:rgba(5,6,8,.7)}
   }
 
   function exportFilename(name, ext) {
-    const base = String(name || '').normalize('NFC').replace(/[^\p{L}\p{N} _-]+/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'reo';
+    const base = String(name || '').normalize('NFC').replace(/[^\p{L}\p{N} _-]+/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'editcat';
     return `${base}.${ext}`;
   }
 
@@ -527,13 +527,13 @@ dialog::backdrop{background:rgba(5,6,8,.7)}
     remove, snapTime, audioGain, sourceTime, textAnim, transitionState, exportFilename, mediaKind, pruneMissing, History,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
-  else root.ReoCore = core;
+  else root.EditCatCore = core;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 </script>
 <script>
 (() => {
 'use strict';
-const C = window.ReoCore;
+const C = window.EditCatCore;
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -599,7 +599,7 @@ let dbp = null;
 function idb() {
   if (!dbp) dbp = new Promise((res, rej) => {
     try {
-      const r = indexedDB.open('reo-editor', 1);
+      const r = indexedDB.open('editcat', 1);
       r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('blobs'); };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     } catch (e) { rej(e); }
@@ -1290,7 +1290,7 @@ async function boot() {
   $('#loading').remove();
   refreshAll(); requestAnimationFrame(tick);
 }
-window.__reo = {
+window.__editcat = {
   get project() { return P; }, get time() { return time; }, get playing() { return playing; }, get selection() { return sel; },
   get exporting() { return !!exporting; }, get lastExport() { return lastExport; }, get ready() { return !!P && !document.getElementById('loading'); },
   seek, play, pause, select(type, id) { sel = { type, id }; refreshAll(); }, pixel(x, y) { return [...ctx.getImageData(x, y, 1, 1).data]; },

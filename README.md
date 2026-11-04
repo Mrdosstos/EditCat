@@ -1,4 +1,4 @@
-# REO
+# EditCat
 
 Editor de vídeo que roda no navegador, no celular ou no computador. Não precisa instalar nada e os arquivos não saem do seu aparelho.
 
@@ -30,7 +30,7 @@ Editor de vídeo que roda no navegador, no celular ou no computador. Não precis
 src/core.js      lógica de edição pura (sem DOM), usada pelo app e pelos testes
 src/app.html     interface, renderização no canvas, áudio e exportação
 scripts/build.mjs junta os dois em dist/
-dist/reo.html    arquivo único pronto para abrir ou hospedar
+dist/editcat.html    arquivo único pronto para abrir ou hospedar
 dist/index.html  mesma página sem o esqueleto do documento (usada no claude.ai)
 tests/unit/      testes da lógica (node:test)
 tests/e2e/       testes no navegador (Playwright + Chromium)
@@ -42,7 +42,7 @@ tests/e2e/       testes no navegador (Playwright + Chromium)
 npm run build
 ```
 
-Abra `dist/reo.html` no navegador. Para hospedar, basta publicar esse arquivo (GitHub Pages, por exemplo).
+Abra `dist/editcat.html` no navegador. Para hospedar, basta publicar esse arquivo (GitHub Pages, por exemplo).
 
 ## Testes
 
