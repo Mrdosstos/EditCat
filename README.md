@@ -64,7 +64,17 @@ tests/e2e/       testes no navegador (Playwright + Chromium)
 npm run build
 ```
 
-Abra `dist/editcat.html` no navegador. Para hospedar, basta publicar esse arquivo (GitHub Pages, por exemplo).
+Abra `dist/editcat.html` no navegador.
+
+## Hospedar no GitHub Pages
+
+O workflow `.github/workflows/pages.yml` roda todos os testes a cada push na `main` e, se passarem, publica o app no GitHub Pages. Para ligar:
+
+1. No GitHub, abra **Settings → Pages** do repositório.
+2. Em **Build and deployment → Source**, escolha **GitHub Actions**.
+3. Em **Actions**, rode de novo o workflow **Testar e publicar** (ou faça um push).
+
+O endereço fica `https://brancoviana.github.io/EditCat/`. Repositório privado só pode usar Pages em planos pagos; no plano gratuito o repositório precisa ser público. Hospedado, o app consegue baixar o modelo das legendas automáticas e usar o microfone para a narração.
 
 ## Testes
 

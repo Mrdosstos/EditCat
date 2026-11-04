@@ -10,5 +10,8 @@
     "test:e2e": "npm run build && node --test --test-concurrency=1 tests/e2e/*.test.js",
     "test": "npm run test:unit && npm run test:e2e"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
 }
