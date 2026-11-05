@@ -239,3 +239,35 @@ test('snapTime também gruda nas batidas marcadas', () => {
   const P = C.newProject(); P.beats = [3.3];
   near(C.snapTime(P, 3.25, 0, .1), 3.3);
 });
+
+test('alignWords tira palavras depois do fim e põe as que caíram no silêncio de volta na fala', () => {
+  const regions = [[1, 2.5], [4, 6]];
+  const w = [{ w: 'a', t: .4, e: .7 }, { w: 'b', t: 1.2, e: 1.6 }, { w: 'c', t: 2.8, e: 3.1 }, { w: 'd', t: 4.2, e: 6.8 }, { w: 'e', t: 9, e: 9.4 }, { w: 'f', t: 12, e: 12.5 }];
+  const r = C.alignWords(w, regions, 10);
+  assert.deepEqual(r.map(x => x.w), ['a', 'b', 'c', 'd']);
+  near(r[0].t, 1); // was 0.6 s early, in silence
+  assert.ok(r[2].e <= 2.5 + 1e-9 && r[2].t >= 1, 'c volta para o fim da primeira fala');
+  near(r[3].e, 6); // cut at the end of speech
+  r.forEach((x, i) => { assert.ok(regions.some(g => x.t >= g[0] - 1e-9 && x.e <= g[1] + 1e-9), 'dentro da fala: ' + x.w); if (i) assert.ok(x.t >= r[i - 1].t); });
+  assert.equal(C.alignWords([{ w: 'z', t: 8, e: 8.3 }], regions, 10).length, 0, 'palavra longe de qualquer fala é descartada');
+});
+test('remapToLayout leva legendas junto com o trecho do vídeo e descarta as de partes cortadas', () => {
+  const oldClips = [clip('v', 10, { mediaId: 'm' })];
+  // new edit keeps source 6–8 then 2–4
+  const newClips = [clip('a', 0, { mediaId: 'm', in: 6, out: 8 }), clip('b', 0, { mediaId: 'm', in: 2, out: 4 })];
+  const caps = [
+    { id: 1, start: 2.2, dur: 1, text: 'dois tres', words: [{ w: 'dois', t: 0, e: .4 }, { w: 'tres', t: .5, e: .9 }] },
+    { id: 2, start: 6.5, dur: 1, text: 'seis' },
+    { id: 3, start: 0.5, dur: 1, text: 'cortado' },
+    { id: 4, start: 12, dur: 1, text: 'depois do fim' },
+  ];
+  assert.deepEqual(C.remapToLayout(oldClips, newClips, caps).map(c => c.id), [1, 2, 4], 'por padrão, o que está depois do vídeo fica');
+  const r = C.remapToLayout(oldClips, newClips, caps, { dropPast: true });
+  assert.deepEqual(r.map(c => c.id), [1, 2]);
+  near(r[0].start, 2.2); // source 2.2 is at 2.0 + 0.2 in the new edit
+  near(r[0].words[1].t, .5);
+  near(r[1].start, .5); // source 6.5 → 0.5
+  // speed is respected
+  const r2 = C.remapToLayout(oldClips, [clip('a', 0, { mediaId: 'm', in: 0, out: 10, speed: 2 })], [{ id: 9, start: 4, dur: 2, text: 'x' }]);
+  near(r2[0].start, 2); near(r2[0].dur, 1, .01);
+});

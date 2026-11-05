@@ -523,6 +523,65 @@
     return idx;
   }
 
+  /* ---------- keeping captions on the speech ---------- */
+  /** fixes recognised word times with the real sound: drops words past the end, moves words that fall
+      in silence onto the nearest speech (within 1 s) and keeps each word inside its speech region */
+  function alignWords(words, regions, end) {
+    const out = [];
+    (words || []).forEach(w0 => {
+      let t = Math.max(0, +w0.t || 0), e = w0.e != null && w0.e > t ? +w0.e : t + 0.3;
+      if (end != null && t >= end - 0.02) return;
+      if (end != null) e = Math.min(e, end);
+      if (regions && regions.length) {
+        let r = regions.find(g => t < g[1] && e > g[0]);
+        if (!r) {
+          let best = null, bd = 1;
+          regions.forEach(g => { const d = t >= g[1] ? t - g[1] : g[0] - e; if (d >= 0 && d < bd) { bd = d; best = g; } });
+          if (!best) return; // nothing spoken near it: a hallucinated word
+          r = best; const len = Math.min(e - t, r[1] - r[0]);
+          if (t >= r[1]) { e = r[1]; t = e - len; } else { t = r[0]; e = t + len; }
+        }
+        t = Math.max(t, r[0]); e = Math.min(Math.max(e, t + 0.05), r[1]);
+      }
+      const prev = out[out.length - 1];
+      if (prev && t < prev.e) t = Math.min(prev.e, e - 0.02);
+      out.push({ w: w0.w, t, e: Math.max(e, t + 0.02) });
+    });
+    return out;
+  }
+  /** keeps captions and texts attached to the moment of the video they belong to after the main track is re-cut.
+      Items over material that was removed are dropped; items outside the main track stay where they are. */
+  function remapToLayout(oldClips, newClips, items, opts) {
+    opts = opts || {};
+    const lay = cl => { let t = 0; return cl.map(c => { const s = t; t += clipDur(c); return { c, start: s, end: t }; }); };
+    const Lo = lay(oldClips), Ln = lay(newClips), oldEnd = Lo.length ? Lo[Lo.length - 1].end : 0;
+    const toSrc = t => { const l = Lo.find(x => t >= x.start - 1e-6 && t < x.end - 1e-6) || (Math.abs(t - oldEnd) < 1e-6 ? Lo[Lo.length - 1] : null); return l ? { m: l.c.mediaId, s: l.c.in + (t - l.start) * l.c.speed } : null; };
+    const toNew = src => { if (!src) return null; const l = Ln.find(x => x.c.mediaId === src.m && src.s >= x.c.in - 1e-6 && src.s <= x.c.out + 1e-6); return l ? l.start + (src.s - l.c.in) / l.c.speed : null; };
+    const out = [];
+    items.forEach(it => {
+      if (it.start >= oldEnd - 1e-6) { if (!opts.dropPast) out.push(it); return; } // past the old video: nothing to attach to
+      const words = it.words && it.words.length ? it.words : [{ w: it.text, t: 0, e: it.dur }];
+      const mapped = words.map(w => { const a = toNew(toSrc(it.start + w.t)), b = toNew(toSrc(Math.min(it.start + w.e, oldEnd) - 1e-3)); return a == null ? null : { w: w.w, t: a, e: b != null && b > a ? b : a + Math.min(0.4, w.e - w.t) }; }).filter(Boolean);
+      if (!mapped.length) return;
+      const st = mapped[0].t, en = Math.max(...mapped.map(w => w.e));
+      const n = Object.assign({}, it, { start: st, dur: Math.max(0.2, Math.min(en - st, it.dur * 2)) });
+      if (it.words && it.words.length) { n.words = mapped.map(w => ({ w: w.w, t: w.t - st, e: w.e - st })); n.text = mapped.map(w => w.w).join(' '); }
+      out.push(n);
+    });
+    return out;
+  }
+
+  /* ---------- speech recognition settings (shared by the app and the real-model test) ---------- */
+  const ASR_MODELS = ['onnx-community/whisper-base_timestamped', 'onnx-community/whisper-base'];
+  const asrOptions = word => ({ return_timestamps: word ? 'word' : true, language: 'portuguese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 });
+  /** turns pipeline output into words [{w,t,e}]; segment-level output is spread over its words */
+  function asrWords(o) {
+    return ((o && o.chunks) || []).flatMap(c => {
+      const ws = String(c.text).trim().split(/\s+/).filter(Boolean), a = c.timestamp[0], b = c.timestamp[1] != null ? c.timestamp[1] : a + ws.length * 0.35;
+      if (ws.length <= 1) return ws.map(w => ({ w, t: a, e: b }));
+      return ws.map((w, i) => ({ w, t: a + (b - a) * i / ws.length, e: a + (b - a) * (i + 1) / ws.length }));
+    });
+  }
   const core = {
     FPS, TD, ASPECTS, FILTERS, clamp, ease, tcode, secs, newProject, clipDur, audioDur, layout, mainTotal, total,
     currentIdx, filterStr, canvasSize, rows, reorderIndex, moveClip, trimClip, findItem, splitTarget, split, duplicate,
@@ -530,7 +589,7 @@
     CAP_STYLE, upgrade, ovDur, arrOf, span, KF_PROPS, kfValue, setKey, hasKeys, hasKeyAt, keyTimes, toggleKey, setProp, shiftKf,
     ENV_RATE, envelope, envAt, autoThreshold, speechRegions, removeSilences, detectBeats, fitClipsToBeats, normalizeGain,
     splitScript, scriptToCaptions, groupWords, captionWordAt, hexRgb, chromaKey, detachAudio, insertClipAt,
-    beatInterval, norm95, segmentScores, pickHighlights,
+    beatInterval, norm95, segmentScores, pickHighlights, alignWords, remapToLayout, ASR_MODELS, asrOptions, asrWords,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   else root.EditCatCore = core;

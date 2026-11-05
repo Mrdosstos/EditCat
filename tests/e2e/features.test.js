@@ -410,3 +410,65 @@ test('alinhar ao ritmo mantém um vídeo longo com quase o mesmo tamanho', async
   assert.deepEqual(errors, []);
   await context.close();
 });
+
+const stubASR = (page, words) => page.evaluate(w => { window.__editcatASR = async () => w; }, words);
+const capsOf = page => page.evaluate(() => window.__editcat.project.captions.map(c => ({ t: c.text, a: c.start, b: c.start + c.dur })));
+
+test('legendas automáticas ficam sobre a fala: nada no silêncio, nada depois do fim', async () => {
+  const { page, context, errors } = await open('');
+  await importFile(page, 'fala.webm'); // sound at 0–1 s and 2.5–4 s
+  await stubASR(page, [{ w: 'um', t: .3, e: .7 }, { w: 'zero', t: 1.6, e: 1.9 }, { w: 'dois', t: 2.6, e: 3.2 }, { w: 'tres', t: 6, e: 6.5 }, { w: 'quatro', t: 11, e: 13 }]);
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-act="autocap"]');
+  await page.waitForFunction(() => window.__editcat.project.captions.length > 0, null, { timeout: 15000 });
+  const caps = await capsOf(page);
+  const speech = [[0, 1.15], [2.35, 4.05]];
+  for (const c of caps) assert.ok(speech.some(([a, b]) => c.a >= a - 1e-6 && c.b <= b + 1e-6), `legenda "${c.t}" fora da fala: ${c.a}–${c.b}`);
+  assert.ok(!caps.some(c => /tres|quatro/.test(c.t)), 'palavras depois do fim descartadas');
+  assert.ok(caps.some(c => /zero/.test(c.t)), 'palavra no silêncio foi puxada para a fala');
+  const [T, E] = await page.evaluate(() => [window.__editcat.project.captions.reduce((m, c) => Math.max(m, c.start + c.dur), 0), window.__editcat.mediaEnd()]);
+  assert.ok(T <= E + 1e-6, 'sem tela preta no fim');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('cortar o vídeo leva as legendas junto e não deixa tela preta', async () => {
+  const { page, context, errors } = await open('');
+  await importFile(page, 'fala.webm');
+  await stubASR(page, [{ w: 'um', t: .3, e: .7 }, { w: 'dois', t: 2.7, e: 3.2 }]);
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-act="autocap"]');
+  await page.waitForFunction(() => window.__editcat.project.captions.length === 2, null, { timeout: 15000 });
+  await page.click('[data-act="silall"]');
+  const p = await P(page);
+  assert.equal(p.clips.length, 2, 'pausa removida');
+  // "dois" was spoken at 2.7 s of the source; find where that moment is now
+  const [c0, c1] = p.clips, at = (c0.out - c0.in) + (2.7 - c1.in);
+  const dois = p.captions.find(c => /dois/.test(c.text));
+  assert.ok(Math.abs(dois.start - at) < .05, `legenda acompanhou o vídeo: ${dois.start} vs ${at}`);
+  const total = await page.evaluate(() => Math.max(...window.__editcat.project.captions.map(c => c.start + c.dur)));
+  assert.ok(total <= p.clips.reduce((s, c) => s + c.out - c.in, 0) + 1e-6, 'nenhuma legenda depois do fim do vídeo');
+  // moving the second piece to the front moves its caption with it
+  await page.evaluate(() => { const P = window.__editcat.project; P.clips.reverse(); window.__editcat.select('clip', P.clips[0].id); });
+  const d2 = (await P(page)).captions.find(c => /dois/.test(c.text));
+  assert.ok(Math.abs(d2.start - (2.7 - (await P(page)).clips[0].in)) < .05, 'legenda foi junto com o clipe movido');
+  await page.click('#undoBtn');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('vídeo de 10 s com corte de 15 s: legendas acompanham e não aparece tela preta', async () => {
+  const { page, context, errors } = await open('');
+  await importFile(page, 'pouco.webm'); // 10 s
+  await page.evaluate(() => { const P = window.__editcat.project; P.captions = [{ id: 'a', start: 0.2, dur: .6, text: 'oi' }, { id: 'b', start: 7, dur: 1, text: 'meio' }, { id: 'c', start: 11, dur: 2.8, text: 'depois do fim' }]; });
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-chips="autot"] [data-v="15"]');
+  await page.click('[data-act="autocut"]');
+  await page.waitForFunction(() => /Pronto/.test(document.getElementById('st_auto').textContent), null, { timeout: 60000 });
+  const r = await page.evaluate(() => { const E = window.__editcat, P = E.project; return { main: P.clips.reduce((s, c) => s + (c.out - c.in) / c.speed, 0), capEnd: Math.max(0, ...P.captions.map(c => c.start + c.dur)), texts: P.captions.map(c => c.text) }; });
+  assert.ok(r.main <= 10, 'não passa do vídeo: ' + r.main);
+  assert.ok(r.capEnd <= r.main + 1e-6, `legendas terminam antes do fim do vídeo (${r.capEnd} > ${r.main})`);
+  assert.ok(!r.texts.includes('depois do fim'));
+  assert.deepEqual(errors, []);
+  await context.close();
+});

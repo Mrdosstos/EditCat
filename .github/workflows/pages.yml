@@ -43,8 +43,24 @@ jobs:
           name: web
           path: dist/editcat.html
 
+  asr:
+    # real speech model: checks that captions land on the speech (needs internet, so it runs here)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
+      - run: npm install --no-save @huggingface/transformers@3.0.2
+      - uses: actions/cache@v4
+        with:
+          path: node_modules/@huggingface/transformers/.cache
+          key: whisper-models-v1
+      - run: node tests/asr/whisper.mjs
+
   android:
-    needs: test
+    needs: [test, asr]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -70,8 +70,8 @@ function mkCensor(mode) { return { id: uid(), type: 'censor', mode, start: time,
 
 /* ---------- history ---------- */
 function snapshot() { H$.push(P); updateHistBtns(); }
-function undo() { const n = H$.undo(P); if (!n) return; P = n; fixSel(); refreshAll(); }
-function redo() { const n = H$.redo(P); if (!n) return; P = n; fixSel(); refreshAll(); }
+function undo() { const n = H$.undo(P); if (!n) return; P = n; resetCaptionBase(); fixSel(); refreshAll(); }
+function redo() { const n = H$.redo(P); if (!n) return; P = n; resetCaptionBase(); fixSel(); refreshAll(); }
 function updateHistBtns() { $('#undoBtn').disabled = !H$.canUndo; $('#redoBtn').disabled = !H$.canRedo; }
 function fixSel() { if (sel && !findSel()) sel = null; }
 
@@ -767,8 +767,10 @@ function jumpKf(dir) {
 }
 
 /* ---- audio helpers ---- */
+/** end of the material that has sound or picture (captions and titles don't count) */
+function mediaEnd() { return Math.max(C.mainTotal(P), ...P.audios.map(a => a.start + a.out - a.in), ...P.overlays.filter(o => o.type === 'media').map(o => o.start + C.ovDur(o)), 0); }
 async function mixdown(sr, voiceOnly) {
-  const T = total(); if (T <= 0) return null;
+  const T = mediaEnd(); if (T <= 0) return null;
   const items = [];
   layout().forEach(({ c, start }) => { const m = media(c.mediaId); if (m && m.kind === 'video' && c.volume > 0 && !c.detached) items.push({ m, at: start, off: c.in, dur: clipDur(c), rate: c.speed, vol: c.volume }); });
   P.audios.forEach(a => { const m = media(a.mediaId); if (m && (!voiceOnly || a.role === 'voz')) items.push({ m, at: a.start, off: a.in, dur: a.out - a.in, rate: 1, vol: a.volume }); });
@@ -787,6 +789,7 @@ async function mixdown(sr, voiceOnly) {
 function setStatus(k, msg) { toolStatus[k] = msg; const el = document.getElementById('st_' + k); if (el) el.textContent = msg; }
 
 /* ---- tools ---- */
+const ASR_MODELS = C.ASR_MODELS;
 async function toolAutoCaptions() {
   setStatus('cap', 'Preparando o áudio…');
   let samples = await mixdown(16000, true); if (!samples) samples = await mixdown(16000, false);
@@ -796,16 +799,19 @@ async function toolAutoCaptions() {
     try {
       setStatus('cap', 'Baixando o modelo de fala (cerca de 80 MB, só na primeira vez)…');
       const T = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
-      const pipe = await T.pipeline('automatic-speech-recognition', 'onnx-community/whisper-base', { progress_callback: p => { if (p && p.status === 'progress' && p.progress) setStatus('cap', `Baixando o modelo… ${Math.round(p.progress)}%`); } });
+      const prog = { progress_callback: p => { if (p && p.status === 'progress' && p.progress) setStatus('cap', `Baixando o modelo… ${Math.round(p.progress)}%`); } };
+      let pipe; for (const id of ASR_MODELS) { try { pipe = await T.pipeline('automatic-speech-recognition', id, prog); break; } catch (e) { if (id === ASR_MODELS[ASR_MODELS.length - 1]) throw e; } }
       asr = async s => {
-        try { const o = await pipe(s, { return_timestamps: 'word', language: 'portuguese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 }); return (o.chunks || []).map(c => ({ w: c.text, t: c.timestamp[0], e: c.timestamp[1] })); }
-        catch (e) { const o = await pipe(s, { return_timestamps: true, language: 'portuguese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 }); return (o.chunks || []).flatMap(c => { const ws = c.text.trim().split(/\s+/), a = c.timestamp[0], b = c.timestamp[1] ?? a + ws.length * .35; return ws.map((w, i) => ({ w, t: a + (b - a) * i / ws.length, e: a + (b - a) * (i + 1) / ws.length })); }); }
+        try { return C.asrWords(await pipe(s, C.asrOptions(true))); }
+        catch (e) { return C.asrWords(await pipe(s, C.asrOptions(false))); }
       };
     } catch (e) { setStatus('cap', window.EditCatAndroid ? 'Não foi possível baixar o modelo de fala. Confira a conexão com a internet e tente de novo.' : 'Não foi possível baixar o modelo de fala nesta página. Use o app Android, o editcat.html hospedado ou Roteiro para legendas.'); return; }
   }
   setStatus('cap', 'Reconhecendo a fala…');
   let words; try { words = await asr(samples, 16000); } catch (e) { setStatus('cap', 'O reconhecimento de fala falhou: ' + (e.message || e)); return; }
-  const caps = C.groupWords(words || []);
+  // check the recognised times against the real sound: words past the end or in silence are fixed or dropped
+  const env = C.envelope(samples, 16000), regions = C.speechRegions(env, { thresh: C.autoThreshold(env), minSilence: .25, pad: .06 });
+  const caps = C.groupWords(C.alignWords(words || [], regions, samples.length / 16000));
   if (!caps.length) { setStatus('cap', 'Nenhuma fala reconhecida.'); return; }
   snapshot(); P.captions = caps.map(c => Object.assign({ id: uid() }, c)); setStatus('cap', `${caps.length} legendas criadas.`); refreshAll();
 }
@@ -815,7 +821,7 @@ async function toolScriptCaptions() {
   let samples = await mixdown(8000, true); if (!samples) samples = await mixdown(8000, false);
   let regions;
   if (samples) { const env = C.envelope(samples, 8000); regions = C.speechRegions(env, { thresh: C.autoThreshold(env), minSilence: .45 }); }
-  if (!regions || !regions.length) regions = [[0, Math.max(total(), 3)]];
+  if (!regions || !regions.length) regions = [[0, Math.max(mediaEnd(), 3)]];
   const caps = C.scriptToCaptions(text, regions, 32);
   snapshot(); P.captions = caps.map(c => Object.assign({ id: uid() }, c));
   setStatus('script', `${caps.length} legendas distribuídas ${samples ? 'pelos trechos com fala' : 'ao longo do vídeo'}.`); refreshAll();
@@ -882,7 +888,7 @@ async function toolAutoCut() {
   }
   const pick = C.pickHighlights(segs, target);
   if (!pick.length) { setStatus('auto', 'Não encontrei trechos para usar.'); return; }
-  snapshot();
+  snapshot(); syncCaptions(); const oldClips = JSON.parse(JSON.stringify(P.clips));
   P.clips = pick.map((sg, i) => Object.assign(JSON.parse(JSON.stringify(sg.clip)), { id: uid(), in: sg.a, out: sg.b, speed: sg.clip.speed || 1, trans: i ? 'none' : sg.clip.trans, kf: undefined, detached: false }));
   if (beats.length) {
     P.beats = beats.map(b => +b.toFixed(3));
@@ -894,6 +900,7 @@ async function toolAutoCut() {
     const T = C.mainTotal(P), endBeat = [...P.beats].reverse().find(b => b <= T + 1e-6), last = P.clips[P.clips.length - 1];
     if (endBeat != null && T - endBeat > 1e-3 && clipDur(last) - (T - endBeat) >= .3) last.out -= (T - endBeat) * last.speed;
   }
+  P.captions = C.remapToLayout(oldClips, P.clips, P.captions, { dropPast: true }); syncCaptions();
   sel = null;
   setStatus('auto', `Pronto: ${tcode(source).slice(0, 5)} → ${tcode(C.mainTotal(P)).slice(0, 5)}, ${pick.length} trechos${beats.length ? ' no ritmo da música' : ''}. Use Desfazer para voltar.`);
   refreshAll();
@@ -1128,7 +1135,7 @@ function bindInspector(s) {
       if (k === 'speed') insp.querySelectorAll('[data-chips=speedp] .chip').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v === v));
       renderTimeline(); scheduleSave(); updateKfButton();
     });
-    el.addEventListener('change', () => { el._snap = false; renderTimeline(); });
+    el.addEventListener('change', () => { el._snap = false; if (k === 'speed' || k === 'idur') refreshAll(); else renderTimeline(); });
   });
   insp.querySelectorAll('[data-chips]').forEach(g => g.addEventListener('click', e => {
     const b = e.target.closest('.chip'); if (!b) return; const k = g.dataset.chips, v = b.dataset.v;
@@ -1185,12 +1192,22 @@ function renderMedia() {
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (!b) return; const m = media(b.dataset.mid); if (m) { addToTimeline(m, b.dataset.add); closeSheet(); renderToolbar(); toast(b.dataset.add === 'layer' ? 'Camada adicionada' : 'Adicionado à linha do tempo'); } });
 
+/** captions follow the video: whenever the main track is re-cut, move them with the material they belong to */
+let capBase = null;
+const clipSig = cl => JSON.stringify(cl.map(c => [c.mediaId, +c.in.toFixed(4), +c.out.toFixed(4), c.speed]));
+function syncCaptions() {
+  const sig = clipSig(P.clips);
+  if (capBase && sig !== capBase.sig && capBase.clips.length && P.captions.length) P.captions = C.remapToLayout(capBase.clips, P.clips, P.captions);
+  capBase = { sig, clips: JSON.parse(JSON.stringify(P.clips)) };
+}
+function resetCaptionBase() { capBase = null; }
 function updateEmpty() {
   const empty = !P.clips.length && !P.texts.length && !P.audios.length && !P.overlays.length && !P.captions.length;
   $('#emptyState').hidden = !empty;
 }
-$('#exampleBtn').onclick = async () => { snapshot(); await sampleProject(); sel = null; time = 0; refreshAll(); toast('Exemplo aberto. Use Novo para começar do zero.'); };
+$('#exampleBtn').onclick = async () => { snapshot(); resetCaptionBase(); await sampleProject(); sel = null; time = 0; refreshAll(); toast('Exemplo aberto. Use Novo para começar do zero.'); };
 function refreshAll() {
+  syncCaptions();
   updateEmpty();
   setCanvasSize(); renderTimeline(); renderInspector(); renderMedia(); updateHistBtns();
   if (document.activeElement !== $('#projName')) $('#projName').value = P.name;
@@ -1309,7 +1326,7 @@ $('#newBtn').onclick = () => {
   const lb = b.querySelector('span');
   if (Date.now() - newArm > 3000) { newArm = Date.now(); lb.textContent = 'Apagar tudo?'; b.classList.add('warn'); setTimeout(() => { lb.textContent = 'Novo'; b.classList.remove('warn'); }, 3000); return; }
   newArm = 0; lb.textContent = 'Novo'; b.classList.remove('warn');
-  pause(); snapshot(); const keep = P.aspect; P = C.newProject(); P.aspect = keep; sel = null; closeSheet(); time = 0;
+  pause(); snapshot(); resetCaptionBase(); const keep = P.aspect; P = C.newProject(); P.aspect = keep; sel = null; closeSheet(); time = 0;
   idbClear('blobs'); refreshAll(); toast('Projeto novo criado. Use Desfazer se mudou de ideia.');
 };
 window.addEventListener('keydown', e => {
@@ -1360,7 +1377,7 @@ window.__editcat = {
   get project() { return P; }, get time() { return time; }, get playing() { return playing; }, get selection() { return sel; },
   get exporting() { return !!exporting; }, get lastExport() { return lastExport; }, get ready() { return !!P && !document.getElementById('loading'); },
   get recording() { return !!recState; }, env(id) { return RT[id] && RT[id].env ? Array.from(RT[id].env) : null; },
-  autoCut: toolAutoCut, seek, play, pause, select(type, id) { sel = { type, id }; refreshAll(); }, deselect, openTool, get tool() { return tool; }, pixel(x, y) { render(); return [...ctx.getImageData(x, y, 1, 1).data]; },
+  autoCut: toolAutoCut, mediaEnd, seek, play, pause, select(type, id) { sel = { type, id }; refreshAll(); }, deselect, openTool, get tool() { return tool; }, pixel(x, y) { render(); return [...ctx.getImageData(x, y, 1, 1).data]; },
   voiceFx(mediaId, slot) { const v = RT[mediaId] && RT[mediaId].voices && RT[mediaId].voices[slot || 'main']; return v ? { fx: v.fxKey, nodes: (v.nodes || []).map(n => n.constructor.name), vol: v.vol } : null; },
   mixdown,
 };
