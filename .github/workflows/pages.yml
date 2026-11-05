@@ -1,4 +1,4 @@
-name: Testar e publicar
+name: Testar, publicar e gerar APK
 
 on:
   push:
@@ -38,6 +38,48 @@ jobs:
         if: github.event_name != 'pull_request'
         with:
           path: _site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: dist/editcat.html
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: dist
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Compilar APK
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../EditCat-${{ github.run_number }}.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EditCat-apk
+          path: EditCat-*.apk
+      - name: Publicar versão de teste
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "apk-${{ github.run_number }}" EditCat-${{ github.run_number }}.apk \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease \
+            --title "EditCat para Android (teste ${{ github.run_number }})" \
+            --notes "APK de teste gerado a partir de ${{ github.sha }}. Todos os testes passaram antes desta compilação. Para instalar: baixe o arquivo .apk no celular e abra; permita instalar de fontes desconhecidas se o Android pedir."
 
   deploy:
     if: github.event_name != 'pull_request'

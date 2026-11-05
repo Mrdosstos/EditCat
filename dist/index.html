@@ -310,6 +310,7 @@ dialog::backdrop{background:rgba(5,6,8,.7)}
     <div class="spec" id="expInfo"></div>
     <div class="acts">
       <button class="btn" id="expClose" type="button">Fechar</button>
+      <button class="btn" id="expShare" type="button" hidden>Compartilhar</button>
       <button class="btn primary" id="expSave" type="button">Salvar vídeo</button>
     </div>
   </div>
@@ -1478,7 +1479,7 @@ async function toolAutoCaptions() {
         try { const o = await pipe(s, { return_timestamps: 'word', language: 'portuguese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 }); return (o.chunks || []).map(c => ({ w: c.text, t: c.timestamp[0], e: c.timestamp[1] })); }
         catch (e) { const o = await pipe(s, { return_timestamps: true, language: 'portuguese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 }); return (o.chunks || []).flatMap(c => { const ws = c.text.trim().split(/\s+/), a = c.timestamp[0], b = c.timestamp[1] ?? a + ws.length * .35; return ws.map((w, i) => ({ w, t: a + (b - a) * i / ws.length, e: a + (b - a) * (i + 1) / ws.length })); }); }
       };
-    } catch (e) { setStatus('cap', 'Não foi possível baixar o modelo de fala nesta página. Abra o editcat.html hospedado (GitHub Pages) ou use Roteiro para legendas.'); return; }
+    } catch (e) { setStatus('cap', window.EditCatAndroid ? 'Não foi possível baixar o modelo de fala. Confira a conexão com a internet e tente de novo.' : 'Não foi possível baixar o modelo de fala nesta página. Use o app Android, o editcat.html hospedado ou Roteiro para legendas.'); return; }
   }
   setStatus('cap', 'Reconhecendo a fala…');
   let words; try { words = await asr(samples, 16000); } catch (e) { setStatus('cap', 'O reconhecimento de fala falhou: ' + (e.message || e)); return; }
@@ -1541,7 +1542,7 @@ async function toggleRecord() {
   if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Este navegador não grava áudio.'); return; }
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-  catch (e) { toast('O microfone não foi liberado. Na página do claude.ai ele fica bloqueado; use o editcat.html hospedado.'); return; }
+  catch (e) { toast(window.EditCatAndroid ? 'O microfone não foi liberado. Permita o acesso ao microfone para o EditCat nas configurações do Android.' : 'O microfone não foi liberado. Na página do claude.ai ele fica bloqueado; use o app Android ou o editcat.html hospedado.'); return; }
   const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'].find(t => { try { return MediaRecorder.isTypeSupported(t); } catch (e) { return false; } }) || '';
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {}), chunks = [], startT = time;
   rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -1828,14 +1829,15 @@ $('#expGo').onclick = async () => {
   const chunks = []; rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
   exporting = { rec, chunks, mime, prevSel, aborted: false };
   if (monitor) monitor.gain.value = 0;
-  showStep('#expRun'); $('#expBar').style.width = '0%';
+  showStep('#expRun'); $('#expBar').style.width = '0%'; $('#expShare').hidden = true;
+  try { window.EditCatAndroid && window.EditCatAndroid.keepAwake(true); } catch (e) {}
   syncMedia(); await wait(400); rec.start(500); play();
 };
 function updateExportProgress() { const T = total() || 1; $('#expBar').style.width = (time / T * 100).toFixed(1) + '%'; $('#expTime').textContent = `${tcode(time).slice(0, 5)} de ${tcode(T).slice(0, 5)}`; }
 function finishExport() {
   const ex = exporting; if (!ex) return; pause();
   ex.rec.onstop = () => {
-    exporting = null; if (monitor) monitor.gain.value = 1; quality = '720'; sel = ex.prevSel; refreshAll();
+    exporting = null; if (monitor) monitor.gain.value = 1; try { window.EditCatAndroid && window.EditCatAndroid.keepAwake(false); } catch (e) {} quality = '720'; sel = ex.prevSel; refreshAll();
     if (ex.aborted) { dlg.close(); toast('Exportação interrompida'); return; }
     const type = ex.mime.split(';')[0], blob = new Blob(ex.chunks, { type });
     if (lastExport) URL.revokeObjectURL(lastExport.url);
@@ -1845,10 +1847,28 @@ function finishExport() {
   };
   setTimeout(() => { try { ex.rec.stop(); } catch (e) {} }, 150);
 }
+/** Android app: streams the file to the native side in base64 chunks, saved in Downloads/EditCat */
+async function saveAndroid(blob, filename) {
+  const A = window.EditCatAndroid, btn = $('#expSave'), CH = 768 * 1024;
+  btn.disabled = true;
+  try {
+    if (!A.begin(filename, blob.type || 'video/mp4')) throw new Error('begin');
+    for (let off = 0; off < blob.size; off += CH) {
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(blob.slice(off, off + CH)); });
+      if (!A.append(b64)) throw new Error('append');
+      btn.textContent = `Salvando… ${Math.min(100, Math.round((off + CH) / blob.size * 100))}%`;
+    }
+    const where = A.finish(); if (!where) throw new Error('finish');
+    toast(`Salvo em ${where}`); $('#expShare').hidden = false;
+  } catch (e) { try { A.abort(); } catch (x) {} toast('Não foi possível salvar o vídeo no aparelho.'); }
+  btn.disabled = false; btn.textContent = 'Salvar vídeo';
+}
+$('#expShare').onclick = () => { try { window.EditCatAndroid.shareLast(); } catch (e) {} };
 $('#expAbort').onclick = () => { if (exporting) { exporting.aborted = true; finishExport(); } };
 $('#expSave').onclick = async () => {
   if (!lastExport) return;
   const filename = C.exportFilename(P.name, lastExport.ext);
+  if (window.EditCatAndroid) { await saveAndroid(lastExport.blob, filename); return; }
   if (DL) {
     try { await DL.save({ filename, data: lastExport.blob }); toast('Vídeo salvo'); }
     catch (e) { const c = e && e.code; toast(c === 'declined' ? 'Salvamento cancelado' : c === 'rate_limited' ? 'Já existe um pedido aberto. Tente de novo em instantes.' : c === 'too_large' ? 'Arquivo grande demais. Exporte em 720p.' : 'Não foi possível salvar nesta visualização.'); }

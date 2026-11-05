@@ -1,0 +1,44 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'app.editcat'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.editcat'
+        minSdk 29
+        targetSdk 34
+        versionCode Integer.parseInt(System.getenv('VERSION_CODE') ?: '1')
+        versionName "0.3." + (System.getenv('VERSION_CODE') ?: '1')
+    }
+
+    // Test key (Android's standard debug key, committed on purpose) so every
+    // test build has the same signature and installs over the previous one.
+    signingConfigs {
+        test {
+            storeFile file('test.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.test }
+        release { signingConfig signingConfigs.test; minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// The web app is built by `npm run build`; copy it in as the WebView page.
+tasks.register('copyWebApp', Copy) {
+    from(rootProject.file('../dist/editcat.html')) { rename { 'index.html' } }
+    into file('src/main/assets')
+}
+preBuild.dependsOn copyWebApp
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

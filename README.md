@@ -66,6 +66,19 @@ npm run build
 
 Abra `dist/editcat.html` no navegador.
 
+## App Android (APK)
+
+A pasta `android/` tem um app nativo pequeno que abre o EditCat numa WebView e completa o que o navegador não faz sozinho dentro de um app: seletor de arquivos, permissão de microfone para a narração e salvamento dos vídeos exportados em **Downloads/EditCat**, com botão de compartilhar.
+
+A cada push na `main`, depois que todos os testes passam, o GitHub Actions compila o APK e cria uma versão de teste em **Releases** (`apk-<número>`).
+
+Para instalar no celular:
+1. Abra **Releases** do repositório no celular (logado no GitHub) e baixe o `EditCat-<número>.apk` da versão mais recente.
+2. Abra o arquivo. Se o Android pedir, permita instalar apps desta fonte.
+3. As versões seguintes instalam por cima, sem perder os projetos, porque todas usam a mesma chave de teste (`android/app/test.keystore`, senha `android`). Essa chave serve só para testes; para publicar na Play Store é preciso uma chave própria e privada.
+
+Requer Android 10 ou mais novo. Para compilar localmente: `npm run build` e depois, em `android/`, `./gradlew assembleRelease` (precisa do Android SDK).
+
 ## Hospedar no GitHub Pages
 
 O workflow `.github/workflows/pages.yml` roda todos os testes a cada push na `main` e, se passarem, publica o app no GitHub Pages. Para ligar:
@@ -87,7 +100,7 @@ Roda os testes unitários e depois os de navegador. Os de navegador precisam do 
 Casos cobertos:
 
 - Unitários (43): tempo e quadros, encadeamento dos clipes, divisão de vídeo, texto, áudio, camadas e legendas, reordenação estável, aparar, ímã, empilhamento, fades, filtros, formatos, animações, histórico, quadros-chave (interpolação, chave automática, deslocamento ao dividir), envelope de áudio, detecção de fala, remoção de silêncios, batidas e ajuste ao ritmo, equalização de volume, roteiro para legendas, agrupamento de palavras, palavra falada, chroma key, separar áudio, inserir quadro congelado, migração de projetos antigos.
-- Navegador (22): abrir o exemplo; reproduzir/pausar; dividir/desfazer; ajustes por aba; texto; formato; importação; salvamento; exportação; celular; camada com chroma key, máscara e mistura (conferindo pixels); quadros-chave movendo a camada; separar áudio, remover silêncios e equalizar; roteiro para legendas nos trechos com fala; legendas automáticas (com um reconhecedor de teste); batidas e ajuste ao ritmo; efeitos de voz e música abaixando na fala; congelar quadro; inverter; desfoque e mosaico; narração com microfone simulado; exportação com camada, legenda e mosaico conferida com `ffprobe`.
+- Navegador (24): ponte do app Android salvando o vídeo inteiro, byte a byte, e cancelando se falhar; abrir o exemplo; reproduzir/pausar; dividir/desfazer; ajustes por aba; texto; formato; importação; salvamento; exportação; celular; camada com chroma key, máscara e mistura (conferindo pixels); quadros-chave movendo a camada; separar áudio, remover silêncios e equalizar; roteiro para legendas nos trechos com fala; legendas automáticas (com um reconhecedor de teste); batidas e ajuste ao ritmo; efeitos de voz e música abaixando na fala; congelar quadro; inverter; desfoque e mosaico; narração com microfone simulado; exportação com camada, legenda e mosaico conferida com `ffprobe`.
 
 ## Limites conhecidos
 

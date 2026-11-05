@@ -1,0 +1,9 @@
+<resources>
+    <style name="EditCatTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ink</item>
+        <item name="android:statusBarColor">@color/panel</item>
+        <item name="android:navigationBarColor">@color/ink</item>
+    </style>
+    <color name="ink">#0D0F12</color>
+    <color name="panel">#15181D</color>
+</resources>
