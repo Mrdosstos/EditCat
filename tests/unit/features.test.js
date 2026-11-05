@@ -131,12 +131,39 @@ test('detectBeats encontra batidas regulares', () => {
   assert.equal(got.length, beats.length);
   got.forEach((g, i) => near(g, beats[i], .03));
 });
-test('fitClipsToBeats faz cada clipe terminar numa batida, respeitando a mídia', () => {
+test('fitClipsToBeats leva o fim de cada clipe à batida mais próxima, sem encolher vídeos longos', () => {
   const P = C.newProject();
   P.clips = [clip('a', 3), clip('b', 3), clip('c', 0.5, {})];
   const n = C.fitClipsToBeats(P, [0.2, 1, 2.1, 4], c => (c.id === 'c' ? 0.5 : 10));
   assert.equal(n, 2);
-  near(P.clips[0].out, 1); near(P.clips[1].out, 1.1);
+  near(P.clips[0].out, 2.1); near(P.clips[1].out, 1.9);
+  // a 60 s video on a 0.625 s beat grid keeps (almost) its length: the old version cut it to one beat
+  const Q = C.newProject(); Q.clips = [clip('v', 60)];
+  const beats = Array.from({ length: 120 }, (_, i) => +(i * 0.625).toFixed(3));
+  C.fitClipsToBeats(Q, beats, () => 60);
+  assert.ok(Q.clips[0].out > 59 && Q.clips[0].out <= 60, 'duração ' + Q.clips[0].out);
+});
+test('beatInterval acha o intervalo típico entre batidas', () => {
+  near(C.beatInterval([0, .625, 1.25, 1.875, 2.5, 2.6]), .625);
+  assert.equal(C.beatInterval([1]), 0);
+});
+test('segmentScores e pickHighlights escolhem os trechos com mais movimento e som, na ordem original', () => {
+  // 20 s sampled every 0.5 s: action at 6–10 s and 14–18 s
+  const step = .5, n = 40, motion = new Float32Array(n), audio = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const t = i * step, hot = (t >= 6 && t < 10) || (t >= 14 && t < 18); motion[i] = hot ? .8 + .1 * Math.sin(i) : .02; audio[i] = hot ? .3 : .01; }
+  const segs = C.segmentScores(motion, audio, step, 20, 2).map(s => Object.assign(s, { key: 'v', order: 0 }));
+  assert.equal(segs.length, 10);
+  const pick = C.pickHighlights(segs, 8);
+  assert.deepEqual(pick.map(s => [s.a, s.b]), [[6, 8], [8, 10], [14, 16], [16, 18]]);
+  // story order across clips, and no overlap
+  const two = C.pickHighlights([{ key: 'x', order: 1, a: 0, b: 2, score: .9 }, { key: 'y', order: 0, a: 4, b: 6, score: .5 }, { key: 'x', order: 1, a: 1, b: 3, score: .8 }], 10);
+  assert.deepEqual(two.map(s => s.key + s.a), ['y4', 'x0']);
+});
+test('autoThreshold fica entre o ruído de fundo e a fala', () => {
+  const env = Float32Array.from({ length: 100 }, (_, i) => (i % 2 ? .2 : .02));
+  const t = C.autoThreshold(env);
+  assert.ok(t > .02 && t < .2, 'limiar ' + t);
+  assert.ok(C.autoThreshold(env, .04) < C.autoThreshold(env, .3));
 });
 test('normalizeGain sobe áudio baixo e desce áudio alto, com limites', () => {
   near(C.normalizeGain(Float32Array.from([.06, .06, 0]), .01), 2);

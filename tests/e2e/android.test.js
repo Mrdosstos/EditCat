@@ -35,7 +35,7 @@ test('no app Android, salvar o vídeo exportado passa pela ponte nativa, em peda
   await context.addInitScript(fakeBridge);
   const page = await context.newPage();
   const errors = []; page.on('pageerror', e => errors.push(String(e)));
-  await page.goto(base);
+  await page.goto(base + '#exemplo');
   await page.waitForFunction(() => window.__editcat && window.__editcat.ready, null, { timeout: 15000 });
   await page.evaluate(() => { const P = window.__editcat.project; P.clips = P.clips.slice(0, 1); P.clips[0].out = 1.2; P.texts = []; P.audios[0].out = 1.2; });
   await page.click('#exportBtn');
@@ -70,7 +70,7 @@ test('se o Android não conseguir gravar, a página cancela e avisa', async () =
   await context.addInitScript(fakeBridge);
   await context.addInitScript(() => { window.addEventListener('DOMContentLoaded', () => { window.EditCatAndroid.append = () => false; }); });
   const page = await context.newPage();
-  await page.goto(base);
+  await page.goto(base + '#exemplo');
   await page.waitForFunction(() => window.__editcat && window.__editcat.ready, null, { timeout: 15000 });
   await page.evaluate(() => { const P = window.__editcat.project; P.clips = P.clips.slice(0, 1); P.clips[0].out = 1; P.texts = []; P.audios[0].out = 1; });
   await page.click('#exportBtn'); await page.click('#expGo');

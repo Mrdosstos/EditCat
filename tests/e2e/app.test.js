@@ -40,7 +40,7 @@ async function open(opts = {}) {
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text())) errors.push(m.text()); });
-  await page.goto(base);
+  await page.goto(base + '#exemplo');
   await page.waitForFunction(() => window.__editcat && window.__editcat.ready, null, { timeout: 15000 });
   return { page, context, errors };
 }
@@ -227,6 +227,33 @@ test('no celular a página não rola para os lados e os controles aparecem', asy
   await page.tap('#playBtn');
   await page.waitForTimeout(400);
   assert.ok(await st(page, () => window.__editcat.time) > 0.1);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('quem entra pela primeira vez vê um projeto vazio, sem vídeo de exemplo', async () => {
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await context.newPage();
+  const errors = []; page.on('pageerror', e => errors.push(String(e)));
+  await page.goto(base);
+  await page.waitForFunction(() => window.__editcat && window.__editcat.ready, null, { timeout: 15000 });
+  const P0 = await page.evaluate(() => window.__editcat.project);
+  assert.equal(P0.clips.length + P0.texts.length + P0.audios.length + P0.media.length, 0);
+  assert.ok(await page.isVisible('#emptyState'));
+  assert.ok(await page.isVisible('#emptyState label[for="fileIn"]'));
+  assert.equal(await page.locator('.vclip').count(), 0);
+  // importing hides the welcome screen
+  await page.setInputFiles('#fileIn', path.join(FIX, 'foto.png'));
+  await page.waitForFunction(() => window.__editcat.project.clips.length === 1);
+  assert.equal(await page.isVisible('#emptyState'), false);
+  await page.click('#undoBtn');
+  assert.ok(await page.isVisible('#emptyState'));
+  // the sample is optional
+  await page.click('#exampleBtn');
+  await page.waitForFunction(() => window.__editcat.project.clips.length === 3);
+  await page.waitForSelector('#emptyState', { state: 'hidden' });
+  await page.click('#newBtn'); await page.click('#newBtn');
+  assert.ok(await page.isVisible('#emptyState'));
   assert.deepEqual(errors, []);
   await context.close();
 });

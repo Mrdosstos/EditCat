@@ -22,7 +22,7 @@ async function open() {
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text())) errors.push(m.text()); });
-  await page.goto(base);
+  await page.goto(base + '#exemplo');
   await page.waitForFunction(() => window.__editcat && window.__editcat.ready, null, { timeout: 15000 });
   const cdp = await context.newCDPSession(page);
   return { page, context, errors, cdp };

@@ -18,6 +18,13 @@ test.before(async () => {
   ff('-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=30:duration=4', '-f', 'lavfi', '-i', "aevalsrc='if(lt(t,1)+gt(t,2.5),0.5*sin(2*PI*300*t),0)':s=48000:d=4",
     '-c:v', 'libvpx', '-b:v', '300k', '-c:a', 'libopus', '-shortest', path.join(FIX, 'fala.webm'));
   // green screen with a red square in the middle
+  // 20 s: still grey picture and silence, except action (moving picture + tone) at 6–10 s and 14–18 s
+  ff('-f', 'lavfi', '-i', 'color=c=gray:s=320x240:r=30:d=6', '-f', 'lavfi', '-i', 'testsrc2=s=320x240:r=30:d=4', '-f', 'lavfi', '-i', 'color=c=gray:s=320x240:r=30:d=4',
+    '-f', 'lavfi', '-i', 'testsrc2=s=320x240:r=30:d=4', '-f', 'lavfi', '-i', 'color=c=gray:s=320x240:r=30:d=2', '-f', 'lavfi', '-i', "aevalsrc='if(between(t,6,10)+between(t,14,18),0.5*sin(2*PI*300*t),0)':s=48000:d=20",
+    '-filter_complex', '[0:v][1:v][2:v][3:v][4:v]concat=n=5:v=1:a=0[v]', '-map', '[v]', '-map', '5:a', '-c:v', 'libvpx', '-b:v', '400k', '-c:a', 'libopus', path.join(FIX, 'acao.webm'));
+  // 10 s with sound only in the first second
+  ff('-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=30:duration=10', '-f', 'lavfi', '-i', "aevalsrc='if(lt(t,1),0.5*sin(2*PI*300*t),0)':s=48000:d=10",
+    '-c:v', 'libvpx', '-b:v', '300k', '-c:a', 'libopus', '-shortest', path.join(FIX, 'pouco.webm'));
   ff('-f', 'lavfi', '-i', 'color=c=0x00ff00:size=400x400', '-vf', 'drawbox=x=150:y=150:w=100:h=100:color=red:t=fill', '-frames:v', '1', path.join(FIX, 'verde.png'));
   server = http.createServer((req, res) => {
     const f = path.join(DIST, req.url === '/' ? 'editcat.html' : decodeURIComponent(req.url.split('?')[0]));
@@ -30,13 +37,13 @@ test.before(async () => {
 });
 test.after(async () => { await browser?.close(); server?.close(); fs.rmSync(FIX, { recursive: true, force: true }); });
 
-async function open() {
+async function open(hash = '#exemplo') {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true, permissions: ['microphone'] });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text())) errors.push(m.text()); });
-  await page.goto(base);
+  await page.goto(base + hash);
   await page.waitForFunction(() => window.__editcat && window.__editcat.ready, null, { timeout: 15000 });
   return { page, context, errors };
 }
@@ -332,6 +339,74 @@ test('exportar com camada, legenda e mosaico gera vídeo com imagem e som', asyn
   const file = path.join(FIX, dl.suggestedFilename()); await dl.saveAs(file);
   const probe = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file]).toString();
   assert.match(probe, /video/); assert.match(probe, /audio/);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+const HOT = [[6, 10], [14, 18]];
+const hotShare = clips => { let hot = 0, all = 0; clips.forEach(c => { all += c.out - c.in; HOT.forEach(([a, b]) => { hot += Math.max(0, Math.min(b, c.out) - Math.max(a, c.in)); }); }); return hot / all; };
+
+test('corte automático escolhe os trechos com ação, na ordem, até a duração pedida', async () => {
+  const { page, context, errors } = await open('');
+  await importFile(page, 'acao.webm');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-chips="autot"] [data-v="15"]');
+  await page.click('[data-act="autocut"]');
+  await page.waitForFunction(() => /Pronto/.test(document.getElementById('st_auto').textContent), null, { timeout: 60000 });
+  const p = await P(page);
+  const ranges = p.clips.map(c => [c.in, c.out]);
+  for (const r of [[6, 8], [8, 10], [14, 16], [16, 18]]) assert.ok(ranges.some(([a, b]) => Math.abs(a - r[0]) < .01 && Math.abs(b - r[1]) < .01), 'tem o trecho ' + r + ' em ' + JSON.stringify(ranges));
+  const T = p.clips.reduce((s, c) => s + c.out - c.in, 0);
+  assert.ok(T >= 12 && T <= 15, 'duração ' + T);
+  assert.ok(ranges.every((r, i) => !i || r[0] >= ranges[i - 1][1] - 1e-6), 'na ordem do vídeo');
+  assert.match(await page.textContent('#st_auto'), /00:20 → 00:1[2-5]/);
+  await page.click('#undoBtn');
+  assert.equal((await P(page)).clips.length, 1, 'desfazer volta ao vídeo inteiro');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('corte automático com música corta nas batidas e prioriza a ação', async () => {
+  const { page, context, errors } = await open();
+  await importFile(page, 'acao.webm');
+  await page.evaluate(() => { const P = window.__editcat.project; P.clips = P.clips.slice(-1); P.texts = []; P.audios[0].out = 10; });
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-chips="autot"] [data-v="0"]');
+  await page.click('[data-act="autocut"]');
+  await page.waitForFunction(() => /Pronto/.test(document.getElementById('st_auto').textContent), null, { timeout: 60000 });
+  const p = await P(page);
+  assert.match(await page.textContent('#st_auto'), /no ritmo da música/);
+  let t = 0;
+  for (const c of p.clips) { t += c.out - c.in; assert.ok(p.beats.some(b => Math.abs(b - t) < 1e-3), 'corte numa batida: ' + t); }
+  assert.ok(t > 6 && t <= 10.5, 'cabe na música: ' + t);
+  assert.ok(hotShare(p.clips) >= .75, 'maioria do tempo com ação: ' + hotShare(p.clips));
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('remover silêncios não deixa o vídeo com um segundo: recusa e explica', async () => {
+  const { page, context, errors } = await open('');
+  await importFile(page, 'pouco.webm');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-act="silall"]');
+  assert.match(await page.textContent('#st_sil'), /Quase tudo seria cortado/);
+  const p = await P(page);
+  assert.equal(p.clips.length, 1); assert.ok(Math.abs(p.clips[0].out - 10) < .1, 'vídeo intacto');
+  assert.equal(await page.isDisabled('#undoBtn'), false, 'a importação continua desfazível');
+  await page.click('#undoBtn');
+  assert.equal((await P(page)).clips.length, 0, 'nenhum passo extra no histórico');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('alinhar ao ritmo mantém um vídeo longo com quase o mesmo tamanho', async () => {
+  const { page, context, errors } = await open();
+  await importFile(page, 'acao.webm');
+  await page.evaluate(() => { const P = window.__editcat.project; P.clips = P.clips.slice(-1); P.audios[0].out = 10; });
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
+  await page.click('[data-act="fitbeats"]');
+  const c = (await P(page)).clips[0];
+  assert.ok(c.out - c.in > 9, 'não encolheu para uma batida: ' + (c.out - c.in));
   assert.deepEqual(errors, []);
   await context.close();
 });

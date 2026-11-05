@@ -5,6 +5,7 @@ Editor de vídeo que roda no navegador, no celular ou no computador. Não precis
 ## O que faz
 
 **Tela**
+- O app abre com um projeto vazio; o exemplo fica no botão "Ver um exemplo" (ou no endereço com `#exemplo`).
 - No celular: prévia em tela cheia, linha do tempo que rola por baixo de um cursor fixo no meio, pinça para zoom, toque longo para mudar um clipe de lugar, botão + para adicionar mídia.
 - Barra de ferramentas no rodapé: sem nada selecionado mostra as ferramentas do projeto; ao tocar num clipe, camada, texto, legenda ou áudio mostra só as ferramentas daquele item. Cada ferramenta abre um painel que sobe de baixo.
 - No computador o painel fica fixo à direita e a mídia à esquerda.
@@ -19,8 +20,9 @@ Editor de vídeo que roda no navegador, no celular ou no computador. Não precis
 - **Desfoque e mosaico** para esconder rostos, placas ou telas (animáveis com quadros-chave).
 
 **Cortes inteligentes**
-- **Remover silêncios**: corta as pausas dos clipes de vídeo pela análise do som.
-- **Cortar no ritmo**: marca as batidas da música e faz cada clipe terminar numa batida.
+- **Corte automático**: analisa movimento e som dos vídeos, escolhe os melhores trechos e monta um vídeo de 15 s, 30 s, 60 s ou do tamanho da música; com música, os cortes caem nas batidas.
+- **Remover silêncios**: corta as pausas dos clipes de vídeo pela análise do som; se quase tudo fosse embora, não mexe e avisa.
+- **Alinhar ao ritmo**: leva o fim de cada clipe para a batida mais próxima.
 
 **Legendas**
 - **Legendas automáticas** com o tempo de cada palavra, usando um modelo de reconhecimento de fala (Whisper) que roda no próprio navegador.

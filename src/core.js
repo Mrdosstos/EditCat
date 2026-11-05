@@ -317,10 +317,12 @@
     return e;
   }
   const envAt = (env, t, rate) => (env && env[Math.floor(t * (rate || ENV_RATE))]) || 0;
+  /** silence threshold between the noise floor and the loud parts; sensitivity 0.04–0.4 (default 0.12) */
   function autoThreshold(env, sensitivity) {
     if (!env || !env.length) return 0.01;
-    const s = Array.from(env).sort((a, b) => a - b), p95 = s[Math.floor(0.95 * (s.length - 1))];
-    return Math.max(0.003, p95 * (sensitivity == null ? 0.12 : sensitivity));
+    const s = Array.from(env).sort((a, b) => a - b), q = p => s[Math.floor(p * (s.length - 1))];
+    const floor = q(0.1), loud = q(0.9), k = Math.min(0.9, (sensitivity == null ? 0.12 : sensitivity) * 2.2);
+    return Math.max(0.003, floor + (loud - floor) * k);
   }
   /** spans (seconds) where the envelope is above threshold; short gaps merged, edges padded */
   function speechRegions(env, opts) {
@@ -370,17 +372,53 @@
     return beats;
   }
   /** makes each main clip end on a beat; maxOut(c) limits video clips to their media length */
+  /** moves each main clip's end to the beat nearest to where it ends now (never shrinking it below minDur);
+      maxOut(c) limits video clips to their media length */
   function fitClipsToBeats(P, beats, maxOut, minDur) {
     minDur = minDur || 0.4;
     let t = 0, changed = 0;
     for (const c of P.clips) {
-      const b = beats.find(x => x >= t + minDur);
-      if (b == null) break;
-      const out = c.in + (b - t) * c.speed;
-      if (out <= maxOut(c) + 1e-6) { c.out = out; changed++; }
+      const end = t + clipDur(c), fits = b => c.in + (b - t) * c.speed <= maxOut(c) + 1e-6;
+      const cand = beats.filter(b => b >= t + minDur && fits(b));
+      if (cand.length) {
+        const b = cand.reduce((best, x) => (Math.abs(x - end) < Math.abs(best - end) ? x : best), cand[0]);
+        c.out = c.in + (b - t) * c.speed; changed++;
+      }
       t += clipDur(c);
     }
     return changed;
+  }
+  /** median beat interval, or 0 */
+  function beatInterval(beats) {
+    const g = beats.slice(1).map((b, i) => b - beats[i]).filter(x => x > 0.15).sort((a, b) => a - b);
+    return g.length ? g[Math.floor(g.length / 2)] : 0;
+  }
+  /** normalises a series to 0..1 by its 95th percentile */
+  function norm95(v) {
+    const s = Array.from(v).sort((a, b) => a - b), p = s[Math.floor(0.95 * (s.length - 1))] || 0;
+    return Array.from(v, x => (p > 0 ? Math.min(1, x / p) : 0));
+  }
+  /** cuts [0,dur] into segLen pieces and scores each by motion and sound (series sampled every `step` s) */
+  function segmentScores(motion, audio, step, dur, segLen, weights) {
+    weights = weights || { motion: 0.6, audio: 0.4 };
+    const m = norm95(motion || []), a = norm95(audio || []), out = [];
+    const mean = (arr, t0, t1) => { const i0 = Math.floor(t0 / step), i1 = Math.max(i0 + 1, Math.ceil(t1 / step)); let s = 0, n = 0; for (let i = i0; i < i1 && i < arr.length; i++) { s += arr[i]; n++; } return n ? s / n : 0; };
+    for (let t = 0; t + segLen * 0.6 <= dur + 1e-6; t += segLen) {
+      const b = Math.min(dur, t + segLen);
+      out.push({ a: t, b, score: weights.motion * mean(m, t, b) + weights.audio * mean(a, t, b) });
+    }
+    return out;
+  }
+  /** takes the best segments until `target` seconds, then puts them back in story order */
+  function pickHighlights(segs, target) {
+    const chosen = []; let tot = 0;
+    [...segs].sort((x, y) => y.score - x.score || x.order - y.order || x.a - y.a).forEach(sg => {
+      if (tot >= target - 1e-6) return;
+      if (chosen.some(c => c.key === sg.key && sg.a < c.b - 1e-6 && sg.b > c.a + 1e-6)) return;
+      if (chosen.length && tot + (sg.b - sg.a) > target + 1e-6) return; // never go past the requested length
+      chosen.push(sg); tot += sg.b - sg.a;
+    });
+    return chosen.sort((x, y) => x.order - y.order || x.a - y.a);
   }
   /** volume multiplier that brings the voiced part of a clip to the target loudness */
   function normalizeGain(env, thresh, target) {
@@ -492,6 +530,7 @@
     CAP_STYLE, upgrade, ovDur, arrOf, span, KF_PROPS, kfValue, setKey, hasKeys, hasKeyAt, keyTimes, toggleKey, setProp, shiftKf,
     ENV_RATE, envelope, envAt, autoThreshold, speechRegions, removeSilences, detectBeats, fitClipsToBeats, normalizeGain,
     splitScript, scriptToCaptions, groupWords, captionWordAt, hexRgb, chromaKey, detachAudio, insertClipAt,
+    beatInterval, norm95, segmentScores, pickHighlights,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   else root.EditCatCore = core;

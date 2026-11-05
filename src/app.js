@@ -541,7 +541,7 @@ function renderTimeline() {
   rh += P.beats.map(b => `<i class="beat" style="left:${b * pps}px"></i>`).join('');
   trRuler.innerHTML = rh;
   // main track
-  const L = layout(); let mh = L.length ? '' : '<div class="empty-main">Toque em + para adicionar vídeos ou fotos</div>';
+  const L = layout(); let mh = L.length ? '' : '<div class="empty-main">Sem vídeos ainda</div>';
   L.forEach(({ c, start }) => {
     const m = media(c.mediaId), rt = m && RT[m.id], bg = rt && rt.thumb ? `background-image:url(${rt.thumb});` : '';
     const tags = (c.speed !== 1 ? `<em>${c.speed.toFixed(2).replace(/0$/, '')}×</em>` : '') + (c.filter !== 'none' ? `<em>${esc((FILTERS.find(f => f.id === c.filter) || {}).name || '')}</em>` : '') + (c.detached ? '<em>sem som</em>' : '') + (c.reversed ? '<em>invertido</em>' : '') + (c.fx && c.fx !== 'none' ? `<em>${esc((VFX.find(v => v[0] === c.fx) || ['', ''])[1])}</em>` : '');
@@ -821,17 +821,82 @@ async function toolScriptCaptions() {
   setStatus('script', `${caps.length} legendas distribuídas ${samples ? 'pelos trechos com fala' : 'ao longo do vídeo'}.`); refreshAll();
 }
 function silenceRegions(m, sens) { const rt = RT[m.id]; if (!rt || !rt.env) return null; return C.speechRegions(rt.env, { thresh: C.autoThreshold(rt.env, sens), minSilence: .35, pad: .1 }); }
-function removeSilencesFrom(clips, sens) {
-  let removed = 0;
-  clips.forEach(c => { const m = media(c.mediaId); if (!m || m.kind !== 'video') return; const r = silenceRegions(m, sens); if (r) removed += C.removeSilences(P, c.id, r, uid); });
+/** removes pauses; refuses when almost everything would go (returns -1) */
+function removeSilencesFrom(clips, sens, beforeApply) {
+  const plan = [];
+  clips.forEach(c => { const m = media(c.mediaId); if (!m || m.kind !== 'video') return; const r = silenceRegions(m, sens); if (r) plan.push([c, r]); });
+  const before = plan.reduce((s, [c]) => s + clipDur(c), 0);
+  const kept = plan.reduce((s, [c, r]) => s + r.reduce((k, [a, b]) => k + Math.max(0, Math.min(b, c.out) - Math.max(a, c.in)), 0) / c.speed, 0);
+  if (before > 0 && kept < before * 0.3) return -1;
+  if (beforeApply) beforeApply();
+  let removed = 0; plan.forEach(([c, r]) => { removed += C.removeSilences(P, c.id, r, uid); });
   return removed;
 }
 function toolRemoveSilencesAll() {
   const sens = +(($('#f_sens') || {}).value || .12);
   const vids = P.clips.filter(c => { const m = media(c.mediaId); return m && m.kind === 'video' && RT[m.id] && RT[m.id].env; });
   if (!vids.length) { setStatus('sil', 'Nenhum clipe de vídeo com som.'); return; }
-  snapshot(); const r = removeSilencesFrom(vids, sens); sel = null;
-  setStatus('sil', r > 0 ? `${r.toFixed(1)}s de silêncio removidos.` : 'Nenhum silêncio longo encontrado.'); refreshAll();
+  const T0 = C.mainTotal(P); const r = removeSilencesFrom(vids, sens, snapshot);
+  if (r < 0) { setStatus('sil', 'Quase tudo seria cortado, então nada foi mudado. Diminua a sensibilidade.'); return; }
+  sel = null; setStatus('sil', r > 0 ? `${r.toFixed(1)}s de pausas removidas: ${tcode(T0).slice(0, 5)} → ${tcode(C.mainTotal(P)).slice(0, 5)}.` : 'Nenhuma pausa longa encontrada.'); refreshAll();
+}
+/** samples how much the picture changes every `step` seconds (small grey frames, mean absolute difference) */
+async function analyzeMotion(m, step, onProgress) {
+  const rt = RT[m.id]; if (rt.motion && rt.motionStep === step) return rt.motion;
+  const el = mkEl(rt, 'video'); el.muted = true; await once(el, 'loadeddata').catch(() => {});
+  const [c, g] = mk(48, 27, { willReadFrequently: true }), n = Math.max(1, Math.floor(m.duration / step)), out = new Float32Array(n);
+  let prev = null;
+  for (let i = 0; i < n; i++) {
+    el.currentTime = Math.min(m.duration - .05, i * step + step / 2); await Promise.race([once(el, 'seeked'), wait(1500)]).catch(() => {});
+    g.drawImage(el, 0, 0, 48, 27); const d = g.getImageData(0, 0, 48, 27).data, cur = new Float32Array(48 * 27);
+    let diff = 0; for (let j = 0, k = 0; j < d.length; j += 4, k++) { cur[k] = d[j] * .3 + d[j + 1] * .59 + d[j + 2] * .11; if (prev) diff += Math.abs(cur[k] - prev[k]); }
+    out[i] = prev ? diff / cur.length : 0; prev = cur;
+    if (onProgress && i % 4 === 0) onProgress((i + 1) / n);
+  }
+  if (n > 1) out[0] = out[1];
+  el.remove(); rt.motion = out; rt.motionStep = step;
+  return out;
+}
+let autoTarget = 15;
+async function toolAutoCut() {
+  const vids = P.clips.filter(c => { const m = media(c.mediaId); return m && m.kind === 'video'; });
+  if (!vids.length) { setStatus('auto', 'Adicione pelo menos um vídeo.'); return; }
+  const music = P.audios.find(a => a.role === 'musica');
+  let beats = [];
+  if (music && RT[music.mediaId] && RT[music.mediaId].env) beats = C.detectBeats(RT[music.mediaId].env).filter(b => b >= music.in && b < music.out).map(b => music.start + b - music.in);
+  const iv = C.beatInterval(beats), segLen = iv ? iv * Math.max(1, Math.round(1.8 / iv)) : 2;
+  const source = P.clips.reduce((s, c) => s + clipDur(c), 0);
+  let target = autoTarget === 0 && music ? music.out - music.in : autoTarget || 15;
+  target = Math.min(target, Math.max(segLen, source * 0.7));
+  const step = .5, segs = [];
+  for (let oi = 0; oi < P.clips.length; oi++) {
+    const c = P.clips[oi], m = media(c.mediaId);
+    if (m.kind !== 'video') { segs.push({ key: c.id, order: oi, a: c.in, b: c.in + Math.min(segLen, c.out - c.in), score: .35, clip: c }); continue; }
+    setStatus('auto', `Analisando ${esc(m.name)}…`);
+    const motion = await analyzeMotion(m, step, p => setStatus('auto', `Analisando ${esc(m.name)}… ${Math.round(p * 100)}%`));
+    const env = RT[m.id].env, audio = new Float32Array(motion.length);
+    if (env) for (let i = 0; i < audio.length; i++) { let sum = 0, n = 0; for (let j = Math.floor(i * step * C.ENV_RATE); j < Math.floor((i + 1) * step * C.ENV_RATE) && j < env.length; j++) { sum += env[j]; n++; } audio[i] = n ? sum / n : 0; }
+    C.segmentScores(motion, env ? audio : null, step, m.duration, segLen, env ? undefined : { motion: 1, audio: 0 })
+      .filter(sg => sg.a >= c.in - 1e-6 && sg.b <= c.out + 1e-6)
+      .forEach(sg => segs.push(Object.assign(sg, { key: c.id, order: oi, clip: c })));
+  }
+  const pick = C.pickHighlights(segs, target);
+  if (!pick.length) { setStatus('auto', 'Não encontrei trechos para usar.'); return; }
+  snapshot();
+  P.clips = pick.map((sg, i) => Object.assign(JSON.parse(JSON.stringify(sg.clip)), { id: uid(), in: sg.a, out: sg.b, speed: sg.clip.speed || 1, trans: i ? 'none' : sg.clip.trans, kf: undefined, detached: false }));
+  if (beats.length) {
+    P.beats = beats.map(b => +b.toFixed(3));
+    const maxOut = c => { const m = media(c.mediaId); return m.kind === 'video' ? m.duration : 120; };
+    C.fitClipsToBeats(P, P.beats, maxOut, segLen * .5);
+    // end on a beat and inside the requested length
+    const lastBeat = [...P.beats].reverse().find(b => b <= target + 1e-6);
+    while (P.clips.length > 1 && C.mainTotal(P) > (lastBeat ?? target) + 1e-3) P.clips.pop();
+    const T = C.mainTotal(P), endBeat = [...P.beats].reverse().find(b => b <= T + 1e-6), last = P.clips[P.clips.length - 1];
+    if (endBeat != null && T - endBeat > 1e-3 && clipDur(last) - (T - endBeat) >= .3) last.out -= (T - endBeat) * last.speed;
+  }
+  sel = null;
+  setStatus('auto', `Pronto: ${tcode(source).slice(0, 5)} → ${tcode(C.mainTotal(P)).slice(0, 5)}, ${pick.length} trechos${beats.length ? ' no ritmo da música' : ''}. Use Desfazer para voltar.`);
+  refreshAll();
 }
 function musicItem() { return (sel && sel.type === 'audio' && findSel()) || P.audios.find(a => a.role === 'musica'); }
 function toolBeats() {
@@ -842,8 +907,8 @@ function toolBeats() {
 }
 function toolFitBeats() {
   if (!P.beats.length && !toolBeats()) return;
-  snapshot(); const n = C.fitClipsToBeats(P, P.beats, c => { const m = media(c.mediaId); return m.kind === 'video' ? m.duration : 120; });
-  setStatus('beat', `${n} clipe(s) ajustado(s) às batidas.`); refreshAll();
+  const T0 = C.mainTotal(P); snapshot(); const n = C.fitClipsToBeats(P, P.beats, c => { const m = media(c.mediaId); return m.kind === 'video' ? m.duration : 120; });
+  setStatus('beat', `${n} corte(s) alinhado(s) às batidas: ${tcode(T0).slice(0, 5)} → ${tcode(C.mainTotal(P)).slice(0, 5)}.`); refreshAll();
 }
 function normalizeItem(o, type, noSnap) {
   const m = media(o.mediaId), rt = m && RT[m.id]; if (!rt || !rt.env) return false;
@@ -965,8 +1030,9 @@ const SECTIONS = {
       <div class="tool"><h3>Legendas automáticas</h3><p>Reconhece a fala e cria legendas com o tempo de cada palavra, usando um modelo de IA no próprio aparelho (baixa uma vez).</p><div class="row-btns">${act('autocap', 'Gerar legendas', 'primary')}</div><div class="status" id="st_cap">${esc(toolStatus.cap || '')}</div></div>
       <div class="tool"><h3>Roteiro para legendas</h3><p>Cole o texto falado. O EditCat divide em frases curtas e encaixa nos trechos com fala.</p><textarea id="f_script" placeholder="Cole aqui o roteiro…"></textarea><div class="row-btns">${act('scriptcap', 'Criar legendas')}</div><div class="status" id="st_script">${esc(toolStatus.script || '')}</div></div></div>` },
     cortes: { title: 'Cortes IA', html: () => `<div class="sec"><div class="lbl">Cortes inteligentes</div>
+      <div class="tool"><h3>Corte automático</h3><p>Analisa movimento e som dos seus vídeos, escolhe os melhores trechos e monta um vídeo curto. Com música, os cortes caem nas batidas.</p>${chips('autot', [[15, '15 s'], [30, '30 s'], [60, '60 s'], [0, 'Duração da música']], autoTarget)}<div class="row-btns">${act('autocut', 'Criar corte automático', 'primary')}</div><div class="status" id="st_auto">${esc(toolStatus.auto || '')}</div></div>
       <div class="tool"><h3>Remover silêncios</h3><p>Corta as pausas de todos os clipes de vídeo e junta o resto.</p>${rng('sens', 'Sensibilidade', .04, .4, .01, .12, x => Math.round(x * 100))}<div class="row-btns">${act('silall', 'Remover silêncios')}</div><div class="status" id="st_sil">${esc(toolStatus.sil || '')}</div></div>
-      <div class="tool"><h3>Cortar no ritmo</h3><p>Encontra as batidas da música e faz cada clipe terminar numa batida.</p><div class="row-btns">${act('beats', 'Marcar batidas')}${act('fitbeats', 'Ajustar clipes às batidas')}</div><div class="status" id="st_beat">${esc(toolStatus.beat || '')}</div></div></div>` },
+      <div class="tool"><h3>Alinhar ao ritmo</h3><p>Encontra as batidas da música e move o fim de cada clipe para a batida mais próxima.</p><div class="row-btns">${act('beats', 'Marcar batidas')}${act('fitbeats', 'Alinhar cortes às batidas')}</div><div class="status" id="st_beat">${esc(toolStatus.beat || '')}</div></div></div>` },
     mixagem: { title: 'Mixagem', html: () => `<div class="sec"><div class="lbl">Mixagem</div><div class="tool"><h3>Volume e fala</h3><p>Deixa vozes e músicas com volume parecido e abaixa a música enquanto alguém fala.</p><div class="row-btns">${act('normall', 'Equalizar volume de tudo')}</div><div class="status" id="st_norm">${esc(toolStatus.norm || '')}</div>${check('duck', 'Abaixar música quando houver fala', P.duck.on)}${rng('duckamt', 'Quanto abaixar', .2, .95, .05, P.duck.amount, pct)}</div></div>` },
     esconder: { title: 'Esconder', html: () => sec('Esconder parte da imagem', `<p class="hint">Cobre rostos, placas ou telas. Depois arraste a área na prévia.</p><div class="row-btns">${act('blurbox', 'Adicionar desfoque')}${act('mosaicbox', 'Adicionar mosaico')}</div>`) },
     formato: { title: 'Formato', html: () => sec('Formato', chips('aspect', [['9:16', '9:16 Vertical'], ['16:9', '16:9 Paisagem'], ['1:1', '1:1 Quadrado'], ['4:5', '4:5 Retrato']], P.aspect)) },
@@ -1066,6 +1132,7 @@ function bindInspector(s) {
   });
   insp.querySelectorAll('[data-chips]').forEach(g => g.addEventListener('click', e => {
     const b = e.target.closest('.chip'); if (!b) return; const k = g.dataset.chips, v = b.dataset.v;
+    if (k === 'autot') { autoTarget = +v; g.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', x === b)); return; }
     snapshot();
     if (k === 'aspect') { P.aspect = v; setCanvasSize(); }
     else if (k === 'speedp') s.speed = +v; else if (k === 'kb') s.kb = v === 'true';
@@ -1095,11 +1162,11 @@ function runAct(a, s) {
     kfclear: () => { snapshot(); delete s.kf; refreshAll(); }, flip: () => { snapshot(); s.flip = !s.flip; refreshAll(); },
     center: () => { snapshot(); const l = selLocal() ?? 0; if (sel.type === 'text') { s.x = .5; s.y = .5; } else { C.setProp(s, 'x', l, .5); C.setProp(s, 'y', l, .5); } refreshAll(); },
     freeze: freezeFrame, reverse: reverseClip, detach, rec: toggleRecord,
-    silence: () => { snapshot(); const r = removeSilencesFrom([s], .12); toast(r > 0 ? `${r.toFixed(1)}s de silêncio removidos` : 'Nenhum silêncio longo encontrado'); sel = null; refreshAll(); },
+    silence: () => { const r = removeSilencesFrom([s], .12, snapshot); if (r < 0) { toast('Quase tudo seria cortado, então nada foi mudado.'); return; } toast(r > 0 ? `${r.toFixed(1)}s de pausas removidas` : 'Nenhuma pausa longa encontrada'); sel = null; refreshAll(); },
     normalize: () => { if (normalizeItem(s, sel.type)) { refreshAll(); toast(`Volume ajustado para ${pct(s.volume)}`); } else toast('Este item não tem som para analisar.'); },
     tomain: () => { snapshot(); const m = media(s.mediaId); C.remove(P, sel); const c = mkClip(m, { in: s.in, out: s.out }); C.insertClipAt(P, s.start, c, uid); sel = { type: 'clip', id: c.id }; refreshAll(); },
     delcaps: () => { snapshot(); P.captions = []; sel = null; refreshAll(); },
-    autocap: toolAutoCaptions, scriptcap: toolScriptCaptions, silall: toolRemoveSilencesAll, beats: toolBeats, fitbeats: toolFitBeats, normall: toolNormalizeAll,
+    autocap: toolAutoCaptions, scriptcap: toolScriptCaptions, silall: toolRemoveSilencesAll, autocut: toolAutoCut, beats: toolBeats, fitbeats: toolFitBeats, normall: toolNormalizeAll,
     blurbox: () => addCensor('blur'), mosaicbox: () => addCensor('mosaic'),
   };
   if (acts[a]) acts[a]();
@@ -1118,7 +1185,13 @@ function renderMedia() {
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (!b) return; const m = media(b.dataset.mid); if (m) { addToTimeline(m, b.dataset.add); closeSheet(); renderToolbar(); toast(b.dataset.add === 'layer' ? 'Camada adicionada' : 'Adicionado à linha do tempo'); } });
 
+function updateEmpty() {
+  const empty = !P.clips.length && !P.texts.length && !P.audios.length && !P.overlays.length && !P.captions.length;
+  $('#emptyState').hidden = !empty;
+}
+$('#exampleBtn').onclick = async () => { snapshot(); await sampleProject(); sel = null; time = 0; refreshAll(); toast('Exemplo aberto. Use Novo para começar do zero.'); };
 function refreshAll() {
+  updateEmpty();
   setCanvasSize(); renderTimeline(); renderInspector(); renderMedia(); updateHistBtns();
   if (document.activeElement !== $('#projName')) $('#projName').value = P.name;
   scheduleSave();
@@ -1278,7 +1351,8 @@ async function restore() {
 async function boot() {
   try { await Promise.race([Promise.all(FONTS.map(f => document.fonts.load(`${f.w} 40px ${f.css}`))), wait(2500)]); } catch (e) {}
   let ok = false; try { ok = await restore(); } catch (e) { ok = false; }
-  if (!ok) await sampleProject();
+  // a new person starts with an empty project; the sample is one tap away (or #exemplo)
+  if (!ok) { if (location.hash === '#exemplo') await sampleProject(); else P = C.newProject(); }
   $('#loading').remove();
   refreshAll(); requestAnimationFrame(tick);
 }
@@ -1286,7 +1360,7 @@ window.__editcat = {
   get project() { return P; }, get time() { return time; }, get playing() { return playing; }, get selection() { return sel; },
   get exporting() { return !!exporting; }, get lastExport() { return lastExport; }, get ready() { return !!P && !document.getElementById('loading'); },
   get recording() { return !!recState; }, env(id) { return RT[id] && RT[id].env ? Array.from(RT[id].env) : null; },
-  seek, play, pause, select(type, id) { sel = { type, id }; refreshAll(); }, deselect, openTool, get tool() { return tool; }, pixel(x, y) { render(); return [...ctx.getImageData(x, y, 1, 1).data]; },
+  autoCut: toolAutoCut, seek, play, pause, select(type, id) { sel = { type, id }; refreshAll(); }, deselect, openTool, get tool() { return tool; }, pixel(x, y) { render(); return [...ctx.getImageData(x, y, 1, 1).data]; },
   voiceFx(mediaId, slot) { const v = RT[mediaId] && RT[mediaId].voices && RT[mediaId].voices[slot || 'main']; return v ? { fx: v.fxKey, nodes: (v.nodes || []).map(n => n.constructor.name), vol: v.vol } : null; },
   mixdown,
 };
