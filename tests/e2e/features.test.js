@@ -63,7 +63,6 @@ test('camada com chroma key, máscara e modo de mistura', async () => {
   await page.waitForTimeout(150);
   assert.ok(isGreen(await pixel(page, 360 - 140, 640)), 'camada verde visível');
   assert.deepEqual((await pixel(page, 360, 640)).slice(0, 3).map(v => v > 200), [true, false, false], 'centro vermelho');
-  await page.click('[data-tab="recorte"]');
   await page.check('#f_chon');
   await page.waitForTimeout(100);
   assert.ok(!isGreen(await pixel(page, 360 - 140, 640)), 'verde removido pelo chroma key');
@@ -75,7 +74,6 @@ test('camada com chroma key, máscara e modo de mistura', async () => {
   await page.waitForTimeout(100);
   assert.ok(!isGreen(await pixel(page, 360 - 170, 640 - 170)), 'canto escondido pela máscara');
   assert.ok((await pixel(page, 360, 640))[0] > 200);
-  await page.click('[data-tab="editar"]');
   await page.click('[data-chips="blend"] [data-v="multiply"]');
   p = await P(page);
   assert.equal(p.overlays[0].blend, 'multiply');
@@ -89,7 +87,6 @@ test('quadros-chave animam a camada entre duas posições', async () => {
   const m = await importFile(page, 'verde.png');
   await page.evaluate(() => window.__editcat.seek(1));
   await page.click(`[data-add="layer"][data-mid="${m.id}"]`);
-  await page.click('[data-tab="mov"]');
   await page.locator('#f_mx').fill('0.25');
   await page.click('#kfBtn');
   await page.evaluate(() => window.__editcat.seek(3));
@@ -138,7 +135,7 @@ test('separar áudio, remover silêncios e equalizar volume', async () => {
   const kept = pieces.reduce((s, c) => s + c.out - c.in, 0);
   assert.ok(kept > 2.2 && kept < 2.9, 'sobrou ~2,5 s de som: ' + kept);
   // normalise everything
-  await page.click('#toolsBtn');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
   await page.click('[data-act="normall"]');
   p = await P(page);
   assert.ok(p.clips.filter(c => c.mediaId === m.id).every(c => c.volume > 0.1 && c.volume <= 2));
@@ -150,7 +147,7 @@ test('separar áudio, remover silêncios e equalizar volume', async () => {
 test('legendas a partir do roteiro caem nos trechos com fala; estilo vale para todas', async () => {
   const { page, context, errors } = await open();
   await importFile(page, 'fala.webm');
-  await page.click('#toolsBtn');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
   await page.fill('#f_script', 'Primeira parte do vídeo. Agora a segunda parte.');
   await page.click('[data-act="scriptcap"]');
   await page.waitForFunction(() => window.__editcat.project.captions.length === 2, null, { timeout: 10000 });
@@ -178,7 +175,7 @@ test('legendas automáticas usam o reconhecimento de fala e o tempo de cada pala
   await importFile(page, 'fala.webm');
   const got = await page.evaluate(() => { window.__asrCalls = []; window.__editcatASR = async (samples, sr) => { window.__asrCalls.push({ n: samples.length, sr }); return [{ w: 'Olá', t: 9.3, e: 9.6 }, { w: 'pessoal.', t: 9.65, e: 10.1 }, { w: 'Tudo', t: 11.8, e: 12.1 }, { w: 'certo?', t: 12.15, e: 12.6 }]; }; return true; });
   assert.ok(got);
-  await page.click('#toolsBtn');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
   await page.click('[data-act="autocap"]');
   await page.waitForFunction(() => window.__editcat.project.captions.length === 2, null, { timeout: 15000 });
   const calls = await page.evaluate(() => window.__asrCalls);
@@ -194,7 +191,7 @@ test('legendas automáticas usam o reconhecimento de fala e o tempo de cada pala
 
 test('marcar batidas da música e ajustar os clipes ao ritmo', async () => {
   const { page, context, errors } = await open();
-  await page.click('#toolsBtn');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
   await page.click('[data-act="beats"]');
   let p = await P(page);
   assert.ok(p.beats.length >= 12 && p.beats.length <= 16, 'batidas: ' + p.beats.length);
@@ -217,7 +214,6 @@ test('efeitos de voz montam a cadeia de áudio; música abaixa quando há fala',
   const music = p.audios[0];
   await page.evaluate(id => { const a = window.__editcat.project.audios.find(x => x.id === id); a.out = 10; a.fadeOut = 0; a.volume = 1; }, music.id);
   await page.locator(`.aclip[data-id="${music.id}"]`).click();
-  await page.click('[data-tab="efeitos"]');
   await page.click('[data-chips="fx"] [data-v="eco"]');
   await page.check('#f_clean');
   await page.evaluate(() => window.__editcat.seek(9.25));
@@ -229,7 +225,7 @@ test('efeitos de voz montam a cadeia de áudio; música abaixa quando há fala',
   assert.ok(v.vol > .9, 'sem abaixar: ' + v.vol);
   await page.click('#playBtn');
   // ducking on: the video's tone plays at 9.2–10.2, so the music drops
-  await page.click('#toolsBtn');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
   await page.check('#f_duck');
   await page.evaluate(() => window.__editcat.seek(9.3));
   await page.click('#playBtn');
@@ -282,7 +278,7 @@ test('inverter gera um clipe tocando de trás para frente com a mesma duração'
 test('desfoque e mosaico escondem uma área e podem ser arrastados', async () => {
   const { page, context, errors } = await open();
   await page.evaluate(() => window.__editcat.seek(1));
-  await page.click('#toolsBtn');
+  await page.evaluate(() => window.__editcat.deselect()); await page.click('#toolsBtn');
   await page.click('[data-act="mosaicbox"]');
   let p = await P(page);
   assert.equal(p.overlays[0].type, 'censor'); assert.equal(p.overlays[0].mode, 'mosaic');

@@ -101,7 +101,6 @@ test('selecionar clipe abre ajustes; filtro e velocidade mudam o projeto; Delete
   await page.click('[data-chips="trans"] [data-v="wipe"]');
   let P = await st(page, () => window.__editcat.project);
   assert.equal(P.clips[0].trans, 'wipe');
-  await page.click('[data-tab="cor"]');
   await page.waitForSelector('.insp .fgrid');
   await page.click('[data-filter="mono"]');
   P = await st(page, () => window.__editcat.project);

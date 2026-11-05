@@ -4,6 +4,11 @@ Editor de vídeo que roda no navegador, no celular ou no computador. Não precis
 
 ## O que faz
 
+**Tela**
+- No celular: prévia em tela cheia, linha do tempo que rola por baixo de um cursor fixo no meio, pinça para zoom, toque longo para mudar um clipe de lugar, botão + para adicionar mídia.
+- Barra de ferramentas no rodapé: sem nada selecionado mostra as ferramentas do projeto; ao tocar num clipe, camada, texto, legenda ou áudio mostra só as ferramentas daquele item. Cada ferramenta abre um painel que sobe de baixo.
+- No computador o painel fica fixo à direita e a mídia à esquerda.
+
 **Edição**
 - Linha do tempo com cinco faixas: legenda, texto, camada, vídeo e áudio. Arraste para mover, puxe as bordas para aparar, ímã nas bordas, no cursor e nas batidas.
 - Dividir, duplicar, excluir, desfazer e refazer (até 100 passos).
@@ -100,7 +105,7 @@ Roda os testes unitários e depois os de navegador. Os de navegador precisam do 
 Casos cobertos:
 
 - Unitários (43): tempo e quadros, encadeamento dos clipes, divisão de vídeo, texto, áudio, camadas e legendas, reordenação estável, aparar, ímã, empilhamento, fades, filtros, formatos, animações, histórico, quadros-chave (interpolação, chave automática, deslocamento ao dividir), envelope de áudio, detecção de fala, remoção de silêncios, batidas e ajuste ao ritmo, equalização de volume, roteiro para legendas, agrupamento de palavras, palavra falada, chroma key, separar áudio, inserir quadro congelado, migração de projetos antigos.
-- Navegador (24): ponte do app Android salvando o vídeo inteiro, byte a byte, e cancelando se falhar; abrir o exemplo; reproduzir/pausar; dividir/desfazer; ajustes por aba; texto; formato; importação; salvamento; exportação; celular; camada com chroma key, máscara e mistura (conferindo pixels); quadros-chave movendo a camada; separar áudio, remover silêncios e equalizar; roteiro para legendas nos trechos com fala; legendas automáticas (com um reconhecedor de teste); batidas e ajuste ao ritmo; efeitos de voz e música abaixando na fala; congelar quadro; inverter; desfoque e mosaico; narração com microfone simulado; exportação com camada, legenda e mosaico conferida com `ffprobe`.
+- Navegador (29): telas de celular (todas as ferramentas da barra abrem o painel certo; barra muda conforme o item; arrastar a linha do tempo move o cursor; toque longo reordena; pinça dá zoom; nada rola para fora da tela); ponte do app Android salvando o vídeo inteiro, byte a byte, e cancelando se falhar; abrir o exemplo; reproduzir/pausar; dividir/desfazer; ajustes por aba; texto; formato; importação; salvamento; exportação; celular; camada com chroma key, máscara e mistura (conferindo pixels); quadros-chave movendo a camada; separar áudio, remover silêncios e equalizar; roteiro para legendas nos trechos com fala; legendas automáticas (com um reconhecedor de teste); batidas e ajuste ao ritmo; efeitos de voz e música abaixando na fala; congelar quadro; inverter; desfoque e mosaico; narração com microfone simulado; exportação com camada, legenda e mosaico conferida com `ffprobe`.
 
 ## Limites conhecidos
 
